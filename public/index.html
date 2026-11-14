@@ -15,17 +15,18 @@
     h1 { font-size:1.8rem; margin:0 0 6px; }
     .lead { color:var(--sub); margin:0 0 20px; }
 
-    /* 슬라이더: scroll-snap 으로 카드 한 장씩 넘김 */
-    .slider { position:relative; }
-    .track { display:flex; overflow-x:auto; scroll-snap-type:x mandatory; scroll-behavior:smooth; gap:16px; scrollbar-width:none; }
-    .track::-webkit-scrollbar { display:none; }
-    .card { flex:0 0 100%; scroll-snap-align:center; background:var(--card); border:1px solid var(--line); border-radius:16px; padding:24px; }
+    /* 슬라이더: transform 으로 카드 이동 (스냅 미사용) */
+    .viewport { overflow:hidden; border-radius:16px; touch-action:pan-y; user-select:none; cursor:grab; }
+    .viewport.drag { cursor:grabbing; }
+    .track { display:flex; align-items:flex-start; transition:transform .35s ease; will-change:transform; }
+    .track.nodrag { transition:none; }
+    .card { flex:0 0 100%; min-width:0; background:var(--card); border:1px solid var(--line); border-radius:16px; padding:24px; }
     .card h2 { font-size:1.2rem; margin:0 0 12px; display:flex; align-items:center; gap:10px; }
     .num { display:inline-grid; place-items:center; width:28px; height:28px; border-radius:50%; background:var(--accent); color:#fff; font-size:.9rem; flex:none; }
     .card ul { margin:6px 0 12px; padding-left:1.2rem; }
     .card li { margin:6px 0; }
     .imgs { display:flex; flex-wrap:wrap; gap:12px; margin-top:12px; }
-    .imgs img { flex:1 1 160px; max-width:100%; border-radius:10px; border:1px solid var(--line); }
+    .imgs img { flex:1 1 160px; max-width:100%; -webkit-user-drag:none; border-radius:10px; border:1px solid var(--line); }
     .btn { display:inline-block; padding:12px 20px; border-radius:10px; background:var(--accent); color:#fff; text-decoration:none; font-weight:600; }
 
     /* 좌우 화살표 */
@@ -48,7 +49,7 @@
 
   <div class="slider">
     <button class="nav prev" aria-label="이전">‹</button>
-    <div class="track" id="track"></div>
+    <div class="viewport" id="viewport"><div class="track" id="track"></div></div>
     <button class="nav next" aria-label="다음">›</button>
   </div>
   <div class="dots" id="dots"></div>
@@ -97,22 +98,41 @@
   const imgs = (s) => s.images?.length
     ? `<div class="imgs">${s.images.map((f) => `<img src="img/${f}" alt="" onerror="this.remove()">`).join("")}</div>` : "";
 
-  // 현재 카드 계산 → 화살표/점 상태 갱신
-  const index = () => Math.round(track.scrollLeft / track.clientWidth);
-  const go = (i) => track.scrollTo({ left: Math.max(0, Math.min(steps.length - 1, i)) * (track.clientWidth + 16) });
+  // 현재 카드 번호를 직접 관리 (cur) → translateX 로 이동
+  let cur = 0;
+  const vp = $("viewport");
+  const clamp = (i) => Math.max(0, Math.min(steps.length - 1, i));
+  const go = (i) => { cur = clamp(i); track.style.transform = `translateX(${-cur * 100}%)`; update(); };
   const update = () => {
-    const i = index();
-    prev.disabled = i <= 0; next.disabled = i >= steps.length - 1;
-    [...dots.children].forEach((d, k) => d.classList.toggle("on", k === i));
+    prev.disabled = cur <= 0; next.disabled = cur >= steps.length - 1;
+    [...dots.children].forEach((d, k) => d.classList.toggle("on", k === cur));
   };
-  track.addEventListener("scroll", () => requestAnimationFrame(update));
-  prev.onclick = () => go(index() - 1);
-  next.onclick = () => go(index() + 1);
+  prev.onclick = () => go(cur - 1);
+  next.onclick = () => go(cur + 1);
   dots.onclick = (e) => e.target.dataset.i && go(+e.target.dataset.i);
   document.addEventListener("keydown", (e) => {
-    if (e.key === "ArrowLeft") go(index() - 1);
-    if (e.key === "ArrowRight") go(index() + 1);
+    if (e.key === "ArrowLeft") go(cur - 1);
+    if (e.key === "ArrowRight") go(cur + 1);
   });
+
+  // 터치/마우스 드래그 스와이프 (Pointer Events 하나로 처리)
+  let startX = 0, dx = 0, dragging = false;
+  vp.addEventListener("pointerdown", (e) => {
+    if (e.target.closest("a,button")) return;       // 버튼/링크 클릭은 방해하지 않음
+    dragging = true; startX = e.clientX; dx = 0;
+    track.classList.add("nodrag"); vp.classList.add("drag");
+  });
+  window.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    dx = e.clientX - startX;
+    track.style.transform = `translateX(calc(${-cur * 100}% + ${dx}px))`;
+  });
+  window.addEventListener("pointerup", () => {
+    if (!dragging) return;
+    dragging = false; track.classList.remove("nodrag"); vp.classList.remove("drag");
+    go(Math.abs(dx) > 50 ? cur + (dx < 0 ? 1 : -1) : cur);   // 50px 이상 끌면 넘김
+  });
+  window.addEventListener("pointercancel", () => { if (dragging) { dragging = false; track.classList.remove("nodrag"); go(cur); } });
 
   // 서버 설정(/config.json) 로드 후 렌더링
   (async () => {
